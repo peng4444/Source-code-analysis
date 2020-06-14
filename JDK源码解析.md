@@ -1,59 +1,10 @@
 # JDK源码解析
-### java.lang.Object [Java面试系列第2篇-Object类中的方法](https://www.cnblogs.com/extjs4/p/12772027.html)
-```java
-public class Object {
-
-    private static native void registerNatives();
-    static {
-        registerNatives();
-    }
-    // 返回此 Object的运行时类。
-    public final native Class<?> getClass();
-    // 返回对象的哈希码值。 
-    public native int hashCode();
-    // 指示一些其他对象是否等于此。 
-    public boolean equals(Object obj) {
-        return (this == obj);
-    }
-    // 创建并返回此对象的副本。 
-    protected native Object clone() throws CloneNotSupportedException;
-    // 返回对象的字符串表示形式。 
-    public String toString() {
-        return getClass().getName() + "@" + Integer.toHexString(hashCode());
-    }
-    // 唤醒正在等待对象监视器的单个线程。 
-    public final native void notify();
-    // 唤醒正在等待对象监视器的所有线程。
-    public final native void notifyAll();
-    // 导致当前线程等待，直到另一个线程调用 notify()方法或该对象的 notifyAll()方法，或者指定的时间已过。 
-    public final native void wait(long timeout) throws InterruptedException;
-    // 导致当前线程等待，直到另一个线程调用该对象的 notify()方法或 notifyAll()方法，或者某些其他线程中断当前线程，或一定量的实时时间。 
-    public final void wait(long timeout, int nanos) throws InterruptedException {
-        if (timeout < 0) {
-            throw new IllegalArgumentException("timeout value is negative");
-        }
-
-        if (nanos < 0 || nanos > 999999) {
-            throw new IllegalArgumentException(
-                                "nanosecond timeout value out of range");
-        }
-
-        if (nanos > 0) {
-            timeout++;
-        }
-
-        wait(timeout);
-    }
-    // 导致当前线程等待，直到另一个线程调用该对象的 notify()方法或 notifyAll()方法。 
-    public final void wait() throws InterruptedException {
-        wait(0);
-    }
-    // 当垃圾收集确定不再有对该对象的引用时，垃圾收集器在对象上调用该对象。 
-    protected void finalize() throws Throwable { }
-}
-
-```
-### java.util.Objects [java.util.Objects 简介](https://blog.csdn.net/lkforce/article/details/56289349)
+[杂谈篇之我是怎么读源码的，授之以渔](https://www.cnblogs.com/youzhibing/p/9553752.html)
+>> 首先我们要对我们的目标有所了解，知道她有什么特点，有些什么功能。
+>> 最好的学习的方式就是模仿，接下来才是创造。
+## Java基础
+### java.util.Objects 
+[java.util.Objects 简介](https://blog.csdn.net/lkforce/article/details/56289349)
 ```java
 package java.util;
 import java.util.function.Supplier;
@@ -120,7 +71,15 @@ public final class Objects {
     }
 }
 ```
-## 容器集合
+### java.lang.String 
+[Java源码之String](https://www.cnblogs.com/chentang/p/13067765.html)
+```markdown
+继承三个接口:Comparable接口、CharSequence接口、Serializable接口。  【留个坑：String为什么实现Charsequence这个接口呢】
+构造方法：本身相关，字节相关，字符相关。
+String常用的方法大概有60多个。在java的String操作中，大多数情况下还是对char[]数组的操作。
+[String 中的 equals 是如何重写的](https://www.cnblogs.com/cxuanBlog/p/13099235.html)
+```
+## Java容器集合
 Iterable——>Collection——>Queue——>BlockingQueue
 ### java.lang.Iterable接口
 ```java
@@ -251,6 +210,823 @@ public interface BlockingQueue<E> extends Queue<E> {
         int drainTo(Collection<? super E> c, int maxElements);
 }
 ```
+### java.util.concurrent.LinkedBlockingQueue类
+#### [Java 经典面试题：聊一聊 JUC 下的 LinkedBlockingQueue](https://www.cnblogs.com/jamaler/p/12849927.html)
+```java
+public class LinkedBlockingQueue<E> extends AbstractQueue<E>
+        implements BlockingQueue<E>, java.io.Serializable {
+    private static final long serialVersionUID = -6903933977591709194L;
+    
+    static class Node<E> {
+            E item;
+            Node<E> next;
+            Node(E x) { item = x; }
+    }
+        private final int capacity;
+    
+        private final AtomicInteger count = new AtomicInteger();
+    
+        transient Node<E> head;
 
+        private transient Node<E> last;
+    
+        private final ReentrantLock takeLock = new ReentrantLock();
+    
+        private final Condition notEmpty = takeLock.newCondition();
+    
+        private final ReentrantLock putLock = new ReentrantLock();
+    
+        private final Condition notFull = putLock.newCondition();
+   
+        private void signalNotEmpty() {
+            final ReentrantLock takeLock = this.takeLock;
+            takeLock.lock();
+            try {
+                notEmpty.signal();
+            } finally {
+                takeLock.unlock();
+            }
+        }
+    
+        private void signalNotFull() {
+            final ReentrantLock putLock = this.putLock;
+            putLock.lock();
+            try {
+                notFull.signal();
+            } finally {
+                putLock.unlock();
+            }
+        }
 
+        private void enqueue(Node<E> node) {
+            // assert putLock.isHeldByCurrentThread();
+            // assert last.next == null;
+            last = last.next = node;
+        }
+    
+        private E dequeue() {
+            // assert takeLock.isHeldByCurrentThread();
+            // assert head.item == null;
+            Node<E> h = head;
+            Node<E> first = h.next;
+            h.next = h; // help GC
+            head = first;
+            E x = first.item;
+            first.item = null;
+            return x;
+        }
+    
+        void fullyLock() {
+            putLock.lock();
+            takeLock.lock();
+        }
+    
+        /**
+         * Unlocks to allow both puts and takes.
+         */
+        void fullyUnlock() {
+            takeLock.unlock();
+            putLock.unlock();
+        }
+    
+    //     /**
+    //      * Tells whether both locks are held by current thread.
+    //      */
+    //     boolean isFullyLocked() {
+    //         return (putLock.isHeldByCurrentThread() &&
+    //                 takeLock.isHeldByCurrentThread());
+    //     }
+    
+        public LinkedBlockingQueue() {
+            this(Integer.MAX_VALUE);
+        }
+
+        public LinkedBlockingQueue(int capacity) {
+            if (capacity <= 0) throw new IllegalArgumentException();
+            this.capacity = capacity;
+            last = head = new Node<E>(null);
+        }
+    
+       
+        public LinkedBlockingQueue(Collection<? extends E> c) {
+            this(Integer.MAX_VALUE);
+            final ReentrantLock putLock = this.putLock;
+            putLock.lock(); // Never contended, but necessary for visibility
+            try {
+                int n = 0;
+                for (E e : c) {
+                    if (e == null)
+                        throw new NullPointerException();
+                    if (n == capacity)
+                        throw new IllegalStateException("Queue full");
+                    enqueue(new Node<E>(e));
+                    ++n;
+                }
+                count.set(n);
+            } finally {
+                putLock.unlock();
+            }
+        }
+    
+        
+        public int size() {
+            return count.get();
+        }
+    
+        public int remainingCapacity() {
+            return capacity - count.get();
+        }
+
+        public void put(E e) throws InterruptedException {
+            if (e == null) throw new NullPointerException();
+            // Note: convention in all put/take/etc is to preset local var
+            // holding count negative to indicate failure unless set.
+            int c = -1;
+            Node<E> node = new Node<E>(e);
+            final ReentrantLock putLock = this.putLock;
+            final AtomicInteger count = this.count;
+            putLock.lockInterruptibly();
+            try {
+                /*
+                 * Note that count is used in wait guard even though it is
+                 * not protected by lock. This works because count can
+                 * only decrease at this point (all other puts are shut
+                 * out by lock), and we (or some other waiting put) are
+                 * signalled if it ever changes from capacity. Similarly
+                 * for all other uses of count in other wait guards.
+                 */
+                while (count.get() == capacity) {
+                    notFull.await();
+                }
+                enqueue(node);
+                c = count.getAndIncrement();
+                if (c + 1 < capacity)
+                    notFull.signal();
+            } finally {
+                putLock.unlock();
+            }
+            if (c == 0)
+                signalNotEmpty();
+        }
+    
+        /**
+         * Inserts the specified element at the tail of this queue, waiting if
+         * necessary up to the specified wait time for space to become available.
+         *
+         * @return {@code true} if successful, or {@code false} if
+         *         the specified waiting time elapses before space is available
+         * @throws InterruptedException {@inheritDoc}
+         * @throws NullPointerException {@inheritDoc}
+         */
+        public boolean offer(E e, long timeout, TimeUnit unit)
+            throws InterruptedException {
+    
+            if (e == null) throw new NullPointerException();
+            long nanos = unit.toNanos(timeout);
+            int c = -1;
+            final ReentrantLock putLock = this.putLock;
+            final AtomicInteger count = this.count;
+            putLock.lockInterruptibly();
+            try {
+                while (count.get() == capacity) {
+                    if (nanos <= 0)
+                        return false;
+                    nanos = notFull.awaitNanos(nanos);
+                }
+                enqueue(new Node<E>(e));
+                c = count.getAndIncrement();
+                if (c + 1 < capacity)
+                    notFull.signal();
+            } finally {
+                putLock.unlock();
+            }
+            if (c == 0)
+                signalNotEmpty();
+            return true;
+        }
+
+        public boolean offer(E e) {
+            if (e == null) throw new NullPointerException();
+            final AtomicInteger count = this.count;
+            if (count.get() == capacity)
+                return false;
+            int c = -1;
+            Node<E> node = new Node<E>(e);
+            final ReentrantLock putLock = this.putLock;
+            putLock.lock();
+            try {
+                if (count.get() < capacity) {
+                    enqueue(node);
+                    c = count.getAndIncrement();
+                    if (c + 1 < capacity)
+                        notFull.signal();
+                }
+            } finally {
+                putLock.unlock();
+            }
+            if (c == 0)
+                signalNotEmpty();
+            return c >= 0;
+        }
+    
+        public E take() throws InterruptedException {
+            E x;
+            int c = -1;
+            final AtomicInteger count = this.count;
+            final ReentrantLock takeLock = this.takeLock;
+            takeLock.lockInterruptibly();
+            try {
+                while (count.get() == 0) {
+                    notEmpty.await();
+                }
+                x = dequeue();
+                c = count.getAndDecrement();
+                if (c > 1)
+                    notEmpty.signal();
+            } finally {
+                takeLock.unlock();
+            }
+            if (c == capacity)
+                signalNotFull();
+            return x;
+        }
+    
+        public E poll(long timeout, TimeUnit unit) throws InterruptedException {
+            E x = null;
+            int c = -1;
+            long nanos = unit.toNanos(timeout);
+            final AtomicInteger count = this.count;
+            final ReentrantLock takeLock = this.takeLock;
+            takeLock.lockInterruptibly();
+            try {
+                while (count.get() == 0) {
+                    if (nanos <= 0)
+                        return null;
+                    nanos = notEmpty.awaitNanos(nanos);
+                }
+                x = dequeue();
+                c = count.getAndDecrement();
+                if (c > 1)
+                    notEmpty.signal();
+            } finally {
+                takeLock.unlock();
+            }
+            if (c == capacity)
+                signalNotFull();
+            return x;
+        }
+    
+        public E poll() {
+            final AtomicInteger count = this.count;
+            if (count.get() == 0)
+                return null;
+            E x = null;
+            int c = -1;
+            final ReentrantLock takeLock = this.takeLock;
+            takeLock.lock();
+            try {
+                if (count.get() > 0) {
+                    x = dequeue();
+                    c = count.getAndDecrement();
+                    if (c > 1)
+                        notEmpty.signal();
+                }
+            } finally {
+                takeLock.unlock();
+            }
+            if (c == capacity)
+                signalNotFull();
+            return x;
+        }
+    
+        public E peek() {
+            if (count.get() == 0)
+                return null;
+            final ReentrantLock takeLock = this.takeLock;
+            takeLock.lock();
+            try {
+                Node<E> first = head.next;
+                if (first == null)
+                    return null;
+                else
+                    return first.item;
+            } finally {
+                takeLock.unlock();
+            }
+        }
+    
+        /**
+         * Unlinks interior Node p with predecessor trail.
+         */
+        void unlink(Node<E> p, Node<E> trail) {
+            // assert isFullyLocked();
+            // p.next is not changed, to allow iterators that are
+            // traversing p to maintain their weak-consistency guarantee.
+            p.item = null;
+            trail.next = p.next;
+            if (last == p)
+                last = trail;
+            if (count.getAndDecrement() == capacity)
+                notFull.signal();
+        }
+
+        public boolean remove(Object o) {
+            if (o == null) return false;
+            fullyLock();
+            try {
+                for (Node<E> trail = head, p = trail.next;
+                     p != null;
+                     trail = p, p = p.next) {
+                    if (o.equals(p.item)) {
+                        unlink(p, trail);
+                        return true;
+                    }
+                }
+                return false;
+            } finally {
+                fullyUnlock();
+            }
+        }
+
+        public boolean contains(Object o) {
+            if (o == null) return false;
+            fullyLock();
+            try {
+                for (Node<E> p = head.next; p != null; p = p.next)
+                    if (o.equals(p.item))
+                        return true;
+                return false;
+            } finally {
+                fullyUnlock();
+            }
+        }
+    
+        /**
+         * Returns an array containing all of the elements in this queue, in
+         * proper sequence.
+         *
+         * <p>The returned array will be "safe" in that no references to it are
+         * maintained by this queue.  (In other words, this method must allocate
+         * a new array).  The caller is thus free to modify the returned array.
+         *
+         * <p>This method acts as bridge between array-based and collection-based
+         * APIs.
+         *
+         * @return an array containing all of the elements in this queue
+         */
+        public Object[] toArray() {
+            fullyLock();
+            try {
+                int size = count.get();
+                Object[] a = new Object[size];
+                int k = 0;
+                for (Node<E> p = head.next; p != null; p = p.next)
+                    a[k++] = p.item;
+                return a;
+            } finally {
+                fullyUnlock();
+            }
+        }
+    
+        /**
+         * Returns an array containing all of the elements in this queue, in
+         * proper sequence; the runtime type of the returned array is that of
+         * the specified array.  If the queue fits in the specified array, it
+         * is returned therein.  Otherwise, a new array is allocated with the
+         * runtime type of the specified array and the size of this queue.
+         *
+         * <p>If this queue fits in the specified array with room to spare
+         * (i.e., the array has more elements than this queue), the element in
+         * the array immediately following the end of the queue is set to
+         * {@code null}.
+         *
+         * <p>Like the {@link #toArray()} method, this method acts as bridge between
+         * array-based and collection-based APIs.  Further, this method allows
+         * precise control over the runtime type of the output array, and may,
+         * under certain circumstances, be used to save allocation costs.
+         *
+         * <p>Suppose {@code x} is a queue known to contain only strings.
+         * The following code can be used to dump the queue into a newly
+         * allocated array of {@code String}:
+         *
+         *  <pre> {@code String[] y = x.toArray(new String[0]);}</pre>
+         *
+         * Note that {@code toArray(new Object[0])} is identical in function to
+         * {@code toArray()}.
+         *
+         * @param a the array into which the elements of the queue are to
+         *          be stored, if it is big enough; otherwise, a new array of the
+         *          same runtime type is allocated for this purpose
+         * @return an array containing all of the elements in this queue
+         * @throws ArrayStoreException if the runtime type of the specified array
+         *         is not a supertype of the runtime type of every element in
+         *         this queue
+         * @throws NullPointerException if the specified array is null
+         */
+        @SuppressWarnings("unchecked")
+        public <T> T[] toArray(T[] a) {
+            fullyLock();
+            try {
+                int size = count.get();
+                if (a.length < size)
+                    a = (T[])java.lang.reflect.Array.newInstance
+                        (a.getClass().getComponentType(), size);
+    
+                int k = 0;
+                for (Node<E> p = head.next; p != null; p = p.next)
+                    a[k++] = (T)p.item;
+                if (a.length > k)
+                    a[k] = null;
+                return a;
+            } finally {
+                fullyUnlock();
+            }
+        }
+    
+        public String toString() {
+            fullyLock();
+            try {
+                Node<E> p = head.next;
+                if (p == null)
+                    return "[]";
+    
+                StringBuilder sb = new StringBuilder();
+                sb.append('[');
+                for (;;) {
+                    E e = p.item;
+                    sb.append(e == this ? "(this Collection)" : e);
+                    p = p.next;
+                    if (p == null)
+                        return sb.append(']').toString();
+                    sb.append(',').append(' ');
+                }
+            } finally {
+                fullyUnlock();
+            }
+        }
+    
+        /**
+         * Atomically removes all of the elements from this queue.
+         * The queue will be empty after this call returns.
+         */
+        public void clear() {
+            fullyLock();
+            try {
+                for (Node<E> p, h = head; (p = h.next) != null; h = p) {
+                    h.next = h;
+                    p.item = null;
+                }
+                head = last;
+                // assert head.item == null && head.next == null;
+                if (count.getAndSet(0) == capacity)
+                    notFull.signal();
+            } finally {
+                fullyUnlock();
+            }
+        }
+    
+        /**
+         * @throws UnsupportedOperationException {@inheritDoc}
+         * @throws ClassCastException            {@inheritDoc}
+         * @throws NullPointerException          {@inheritDoc}
+         * @throws IllegalArgumentException      {@inheritDoc}
+         */
+        public int drainTo(Collection<? super E> c) {
+            return drainTo(c, Integer.MAX_VALUE);
+        }
+    
+        /**
+         * @throws UnsupportedOperationException {@inheritDoc}
+         * @throws ClassCastException            {@inheritDoc}
+         * @throws NullPointerException          {@inheritDoc}
+         * @throws IllegalArgumentException      {@inheritDoc}
+         */
+        public int drainTo(Collection<? super E> c, int maxElements) {
+            if (c == null)
+                throw new NullPointerException();
+            if (c == this)
+                throw new IllegalArgumentException();
+            if (maxElements <= 0)
+                return 0;
+            boolean signalNotFull = false;
+            final ReentrantLock takeLock = this.takeLock;
+            takeLock.lock();
+            try {
+                int n = Math.min(maxElements, count.get());
+                // count.get provides visibility to first n Nodes
+                Node<E> h = head;
+                int i = 0;
+                try {
+                    while (i < n) {
+                        Node<E> p = h.next;
+                        c.add(p.item);
+                        p.item = null;
+                        h.next = h;
+                        h = p;
+                        ++i;
+                    }
+                    return n;
+                } finally {
+                    // Restore invariants even if c.add() threw
+                    if (i > 0) {
+                        // assert h.item == null;
+                        head = h;
+                        signalNotFull = (count.getAndAdd(-i) == capacity);
+                    }
+                }
+            } finally {
+                takeLock.unlock();
+                if (signalNotFull)
+                    signalNotFull();
+            }
+        }
+    
+        /**
+         * Returns an iterator over the elements in this queue in proper sequence.
+         * The elements will be returned in order from first (head) to last (tail).
+         *
+         * <p>The returned iterator is
+         * <a href="package-summary.html#Weakly"><i>weakly consistent</i></a>.
+         *
+         * @return an iterator over the elements in this queue in proper sequence
+         */
+        public Iterator<E> iterator() {
+            return new Itr();
+        }
+    
+        private class Itr implements Iterator<E> {
+            /*
+             * Basic weakly-consistent iterator.  At all times hold the next
+             * item to hand out so that if hasNext() reports true, we will
+             * still have it to return even if lost race with a take etc.
+             */
+    
+            private Node<E> current;
+            private Node<E> lastRet;
+            private E currentElement;
+    
+            Itr() {
+                fullyLock();
+                try {
+                    current = head.next;
+                    if (current != null)
+                        currentElement = current.item;
+                } finally {
+                    fullyUnlock();
+                }
+            }
+    
+            public boolean hasNext() {
+                return current != null;
+            }
+    
+            /**
+             * Returns the next live successor of p, or null if no such.
+             *
+             * Unlike other traversal methods, iterators need to handle both:
+             * - dequeued nodes (p.next == p)
+             * - (possibly multiple) interior removed nodes (p.item == null)
+             */
+            private Node<E> nextNode(Node<E> p) {
+                for (;;) {
+                    Node<E> s = p.next;
+                    if (s == p)
+                        return head.next;
+                    if (s == null || s.item != null)
+                        return s;
+                    p = s;
+                }
+            }
+    
+            public E next() {
+                fullyLock();
+                try {
+                    if (current == null)
+                        throw new NoSuchElementException();
+                    E x = currentElement;
+                    lastRet = current;
+                    current = nextNode(current);
+                    currentElement = (current == null) ? null : current.item;
+                    return x;
+                } finally {
+                    fullyUnlock();
+                }
+            }
+    
+            public void remove() {
+                if (lastRet == null)
+                    throw new IllegalStateException();
+                fullyLock();
+                try {
+                    Node<E> node = lastRet;
+                    lastRet = null;
+                    for (Node<E> trail = head, p = trail.next;
+                         p != null;
+                         trail = p, p = p.next) {
+                        if (p == node) {
+                            unlink(p, trail);
+                            break;
+                        }
+                    }
+                } finally {
+                    fullyUnlock();
+                }
+            }
+        }
+    
+        /** A customized variant of Spliterators.IteratorSpliterator */
+        static final class LBQSpliterator<E> implements Spliterator<E> {
+            static final int MAX_BATCH = 1 << 25;  // max batch array size;
+            final LinkedBlockingQueue<E> queue;
+            Node<E> current;    // current node; null until initialized
+            int batch;          // batch size for splits
+            boolean exhausted;  // true when no more nodes
+            long est;           // size estimate
+            LBQSpliterator(LinkedBlockingQueue<E> queue) {
+                this.queue = queue;
+                this.est = queue.size();
+            }
+    
+            public long estimateSize() { return est; }
+    
+            public Spliterator<E> trySplit() {
+                Node<E> h;
+                final LinkedBlockingQueue<E> q = this.queue;
+                int b = batch;
+                int n = (b <= 0) ? 1 : (b >= MAX_BATCH) ? MAX_BATCH : b + 1;
+                if (!exhausted &&
+                    ((h = current) != null || (h = q.head.next) != null) &&
+                    h.next != null) {
+                    Object[] a = new Object[n];
+                    int i = 0;
+                    Node<E> p = current;
+                    q.fullyLock();
+                    try {
+                        if (p != null || (p = q.head.next) != null) {
+                            do {
+                                if ((a[i] = p.item) != null)
+                                    ++i;
+                            } while ((p = p.next) != null && i < n);
+                        }
+                    } finally {
+                        q.fullyUnlock();
+                    }
+                    if ((current = p) == null) {
+                        est = 0L;
+                        exhausted = true;
+                    }
+                    else if ((est -= i) < 0L)
+                        est = 0L;
+                    if (i > 0) {
+                        batch = i;
+                        return Spliterators.spliterator
+                            (a, 0, i, Spliterator.ORDERED | Spliterator.NONNULL |
+                             Spliterator.CONCURRENT);
+                    }
+                }
+                return null;
+            }
+    
+            public void forEachRemaining(Consumer<? super E> action) {
+                if (action == null) throw new NullPointerException();
+                final LinkedBlockingQueue<E> q = this.queue;
+                if (!exhausted) {
+                    exhausted = true;
+                    Node<E> p = current;
+                    do {
+                        E e = null;
+                        q.fullyLock();
+                        try {
+                            if (p == null)
+                                p = q.head.next;
+                            while (p != null) {
+                                e = p.item;
+                                p = p.next;
+                                if (e != null)
+                                    break;
+                            }
+                        } finally {
+                            q.fullyUnlock();
+                        }
+                        if (e != null)
+                            action.accept(e);
+                    } while (p != null);
+                }
+            }
+    
+            public boolean tryAdvance(Consumer<? super E> action) {
+                if (action == null) throw new NullPointerException();
+                final LinkedBlockingQueue<E> q = this.queue;
+                if (!exhausted) {
+                    E e = null;
+                    q.fullyLock();
+                    try {
+                        if (current == null)
+                            current = q.head.next;
+                        while (current != null) {
+                            e = current.item;
+                            current = current.next;
+                            if (e != null)
+                                break;
+                        }
+                    } finally {
+                        q.fullyUnlock();
+                    }
+                    if (current == null)
+                        exhausted = true;
+                    if (e != null) {
+                        action.accept(e);
+                        return true;
+                    }
+                }
+                return false;
+            }
+    
+            public int characteristics() {
+                return Spliterator.ORDERED | Spliterator.NONNULL |
+                    Spliterator.CONCURRENT;
+            }
+        }
+    
+        /**
+         * Returns a {@link Spliterator} over the elements in this queue.
+         *
+         * <p>The returned spliterator is
+         * <a href="package-summary.html#Weakly"><i>weakly consistent</i></a>.
+         *
+         * <p>The {@code Spliterator} reports {@link Spliterator#CONCURRENT},
+         * {@link Spliterator#ORDERED}, and {@link Spliterator#NONNULL}.
+         *
+         * @implNote
+         * The {@code Spliterator} implements {@code trySplit} to permit limited
+         * parallelism.
+         *
+         * @return a {@code Spliterator} over the elements in this queue
+         * @since 1.8
+         */
+        public Spliterator<E> spliterator() {
+            return new LBQSpliterator<E>(this);
+        }
+    
+        /**
+         * Saves this queue to a stream (that is, serializes it).
+         *
+         * @param s the stream
+         * @throws java.io.IOException if an I/O error occurs
+         * @serialData The capacity is emitted (int), followed by all of
+         * its elements (each an {@code Object}) in the proper order,
+         * followed by a null
+         */
+        private void writeObject(java.io.ObjectOutputStream s)
+            throws java.io.IOException {
+    
+            fullyLock();
+            try {
+                // Write out any hidden stuff, plus capacity
+                s.defaultWriteObject();
+    
+                // Write out all elements in the proper order.
+                for (Node<E> p = head.next; p != null; p = p.next)
+                    s.writeObject(p.item);
+    
+                // Use trailing null as sentinel
+                s.writeObject(null);
+            } finally {
+                fullyUnlock();
+            }
+        }
+    
+        /**
+         * Reconstitutes this queue from a stream (that is, deserializes it).
+         * @param s the stream
+         * @throws ClassNotFoundException if the class of a serialized object
+         *         could not be found
+         * @throws java.io.IOException if an I/O error occurs
+         */
+        private void readObject(java.io.ObjectInputStream s)
+            throws java.io.IOException, ClassNotFoundException {
+            // Read in capacity, and any hidden stuff
+            s.defaultReadObject();
+    
+            count.set(0);
+            last = head = new Node<E>(null);
+    
+            // Read in all elements and place in queue
+            for (;;) {
+                @SuppressWarnings("unchecked")
+                E item = (E)s.readObject();
+                if (item == null)
+                    break;
+                add(item);
+            }
+        }
+}
+```
+## Java并发多线程
+
+##
 [当前标签：JDK源码解析](https://www.cnblogs.com/ysocean/tag/JDK%E6%BA%90%E7%A0%81%E8%A7%A3%E6%9E%90/)
+
+[深入理解，源码解析 Integer 神奇的老哥](https://www.cnblogs.com/huasheng/p/9995543.html)
+
+[随笔分类 - 08. Java基础类型](https://www.cnblogs.com/noteless/category/1307424.html)

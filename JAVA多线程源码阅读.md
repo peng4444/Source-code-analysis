@@ -15,3 +15,4 @@
 
 ## 未阅读
 [Java 中队列同步器 AQS（AbstractQueuedSynchronizer）实现原理](https://www.cnblogs.com/mghio/p/13096392.html)
+[ThreadLocal源码解析-Java8](https://www.cnblogs.com/-beyond/p/13093032.html)
